@@ -20,7 +20,7 @@ mkdir $WORK/feed
 gh release download "$TAG" -R $REPO -p 'NotchPeek-*.zip' -D $WORK/feed
 ZIP=$(ls $WORK/feed/*.zip | head -1)
 ditto -x -k "$ZIP" $WORK/check
-spctl -a -t exec -vv $WORK/check/NotchPeek.app   # must be Developer ID + notarized
+/usr/sbin/spctl -a -t exec -vv $WORK/check/NotchPeek.app   # must be Developer ID + notarized
 $T/generate_appcast --ed-key-file $KEY --download-url-prefix "https://github.com/$REPO/releases/download/$TAG/" -o $WORK/appcast.xml $WORK/feed
 sig=$(sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p' $WORK/appcast.xml | head -1)
 $T/sign_update --verify --ed-key-file $KEY "$ZIP" "$sig"
