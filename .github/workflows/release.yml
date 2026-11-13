@@ -1,8 +1,8 @@
 # Push a tag like v0.3.0 → signed (Developer ID), notarized, stapled NotchPeek-<version>.zip on a GitHub Release.
-# The auto-update feed (appcast.xml) is signed and uploaded afterwards on jaws-mini by scripts/publish-appcast.sh:
-# the Sparkle update key never goes to GitHub.
+# The same run signs the auto-update feed (appcast.xml) with SPARKLE_PRIVATE_KEY and attaches it.
 # Secrets (same as spiel / margins-v2): APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
-# APPLE_API_KEY (base64 .p8), APPLE_API_KEY_ID, APPLE_API_ISSUER.
+# APPLE_API_KEY (base64 .p8), APPLE_API_KEY_ID, APPLE_API_ISSUER,
+# SPARKLE_PRIVATE_KEY (Sparkle EdDSA private key, base64; its public half is SUPublicEDKey in Info.plist).
 name: Release
 on:
   push:
@@ -56,17 +56,38 @@ jobs:
           ditto -c -k --keepParent build/NotchPeek.app "build/NotchPeek-$VERSION.zip"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      - name: Sign the update feed
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$SPARKLE_PRIVATE_KEY" ] || { echo "::error::SPARKLE_PRIVATE_KEY is empty"; exit 1; }
+          TAG="${GITHUB_REF_NAME}"; [[ "$TAG" == v* ]] || TAG="v$VERSION"
+          KEY="$RUNNER_TEMP/sparkle.key"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY"
+          # Installed copies only accept updates signed by the key whose public half they ship with.
+          WANT=$(plutil -extract SUPublicEDKey raw Info.plist)
+          GOT=$({ printf '302e020100300506032b657004220420' | xxd -r -p; base64 -d < "$KEY"; } | openssl pkey -inform DER -pubout -outform DER | tail -c 32 | base64)
+          [ "$WANT" = "$GOT" ] || { echo "::error::SPARKLE_PRIVATE_KEY's public half ($GOT) is not SUPublicEDKey ($WANT)"; exit 1; }
+          mkdir -p build/feed && cp "build/NotchPeek-$VERSION.zip" build/feed/
+          T=vendor/sparkle-tools/bin
+          $T/generate_appcast --ed-key-file "$KEY" --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/" -o build/appcast.xml build/feed
+          grep -q "<sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>" build/appcast.xml || { echo "::error::appcast lacks $VERSION"; exit 1; }
+          sig=$(sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p' build/appcast.xml | head -1)
+          $T/sign_update --verify --ed-key-file "$KEY" "build/NotchPeek-$VERSION.zip" "$sig"
+          cat build/appcast.xml
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           [[ "$TAG" == v* ]] || TAG="v$VERSION"
-          gh release create "$TAG" "build/NotchPeek-$VERSION.zip" --title "NotchPeek $VERSION" --notes "Signed and notarized." \
-            || gh release upload "$TAG" "build/NotchPeek-$VERSION.zip" --clobber
+          gh release create "$TAG" "build/NotchPeek-$VERSION.zip" build/appcast.xml --title "NotchPeek $VERSION" --notes "Signed and notarized." --latest \
+            || gh release upload "$TAG" "build/NotchPeek-$VERSION.zip" build/appcast.xml --clobber
 
       - name: Clean up keys
         if: always()
         run: |
-          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP/sparkle.key"
           security delete-keychain "$RUNNER_TEMP/notchpeek-signing.keychain-db" 2>/dev/null || true

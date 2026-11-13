@@ -28,6 +28,4 @@ NOTCHPEEK_FAKE_NOTCH=2140,85 build/NotchPeek.app/Contents/MacOS/NotchPeek   # te
 Requires macOS 14+.
 
 ## Release
-1. Bump `CFBundleShortVersionString` and `CFBundleVersion` in Info.plist, commit, push a tag `vX.Y.Z`.
-2. CI signs (Developer ID), notarizes, staples and publishes `NotchPeek-X.Y.Z.zip`.
-3. On the machine holding the update key: `scripts/publish-appcast.sh vX.Y.Z` signs the feed and uploads `appcast.xml`.
+Bump `CFBundleShortVersionString` and `CFBundleVersion` in Info.plist, commit, push a tag `vX.Y.Z`. The workflow signs (Developer ID), notarizes, staples, signs the Sparkle feed and publishes `NotchPeek-X.Y.Z.zip` + `appcast.xml` on the release. Secrets: APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER, SPARKLE_PRIVATE_KEY.
