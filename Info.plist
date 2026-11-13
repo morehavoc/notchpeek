@@ -7,9 +7,14 @@
 <key>CFBundleExecutable</key><string>NotchPeek</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.0</string>
-<key>CFBundleVersion</key><string>2</string>
+<key>CFBundleShortVersionString</key><string>0.3.0</string>
+<key>CFBundleVersion</key><string>3</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
+<key>SUFeedURL</key><string>https://github.com/morehavoc/notchpeek/releases/latest/download/appcast.xml</string>
+<key>SUPublicEDKey</key><string>mPLK4WOhJ+Ch7pnpG1LV2NbQUe4vLKPn5RYXLx10yac=</string>
+<key>SUEnableAutomaticChecks</key><true/>
+<key>SUAutomaticallyUpdate</key><true/>
+<key>SUScheduledCheckInterval</key><integer>86400</integer>
 <key>NSHumanReadableCopyright</key><string>MIT License</string>
 </dict></plist>

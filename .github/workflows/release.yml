@@ -1,4 +1,6 @@
-# Push a tag like v0.2.0 → signed (Developer ID), notarized, stapled NotchPeek-<version>.zip on a GitHub Release.
+# Push a tag like v0.3.0 → signed (Developer ID), notarized, stapled NotchPeek-<version>.zip on a GitHub Release.
+# The auto-update feed (appcast.xml) is signed and uploaded afterwards on jaws-mini by scripts/publish-appcast.sh:
+# the Sparkle update key never goes to GitHub.
 # Secrets (same as spiel / margins-v2): APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
 # APPLE_API_KEY (base64 .p8), APPLE_API_KEY_ID, APPLE_API_ISSUER.
 name: Release

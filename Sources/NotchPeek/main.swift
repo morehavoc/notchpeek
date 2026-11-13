@@ -8,6 +8,7 @@ import ApplicationServices
 import Carbon.HIToolbox
 import ServiceManagement
 import SwiftUI
+import Sparkle
 
 // MARK: - Preferences
 
@@ -190,6 +191,7 @@ final class Strip: NSObject {
     private var panel: StripPanel?
     private var hideTimer: Timer?
     var onSettings: (() -> Void)?
+    var onCheckUpdates: (() -> Void)?
     var isVisible: Bool { panel?.isVisible ?? false }
 
     func toggle() { isVisible ? hide() : show() }
@@ -242,6 +244,9 @@ final class Strip: NSObject {
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
+        let upd = NSMenuItem(title: "Check for Updates…", action: #selector(checkUpdates), keyEquivalent: "")
+        upd.target = self
+        menu.addItem(upd)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit NotchPeek", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         bg.menu = menu
@@ -309,6 +314,7 @@ final class Strip: NSObject {
     }
 
     @objc func openSettings() { hide(); onSettings?() }
+    @objc func checkUpdates() { hide(); onCheckUpdates?() }
 
     private func makePanel() -> StripPanel {
         let p = StripPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -463,6 +469,8 @@ final class SettingsModel: ObservableObject {
 
 struct SettingsView: View {
     let preview: () -> Void
+    let checkUpdates: () -> Void
+    @AppStorage("SUAutomaticallyUpdate") var autoUpdate = true
     @AppStorage("hover") var hover = true
     @AppStorage("style") var style = StripStyle.glass.rawValue
     @AppStorage("color") var colorHex = "#1E1E1EE6"
@@ -501,6 +509,12 @@ struct SettingsView: View {
                 Toggle("Show NotchPeek in the menu bar", isOn: $menuBarIcon)
                 Toggle("Open at login", isOn: $model.login)
             }
+            Section("Updates") {
+                Toggle("Install updates automatically", isOn: $autoUpdate)
+                LabeledContent("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")") {
+                    Button("Check Now") { checkUpdates() }
+                }
+            }
             Text("Lost the menu bar icon behind the notch? Open NotchPeek from Applications again to get back here.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
@@ -517,6 +531,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var hotKey: HotKey?
     var statusItem: NSStatusItem?
     var settingsWindow: NSWindow?
+    var updater: SPUStandardUpdaterController?
     var hover: NotchHover?
     var escMonitor: Any?, clickMonitor: Any?
 
@@ -525,6 +540,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let args = CommandLine.arguments
         if args.contains("--list") { listAndExit() }
         strip.onSettings = { [weak self] in self?.showSettings() }
+        strip.onCheckUpdates = { [weak self] in self?.checkForUpdates() }
 
         if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
             waitForTrust()
@@ -534,6 +550,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func start() {
+        updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         hotKey = HotKey { [weak self] in self?.strip.toggle() }
         applyPrefs()
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -565,6 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let m = NSMenu()
             m.addItem(withTitle: "Show Hidden Icons", action: #selector(showStrip), keyEquivalent: "").target = self
             m.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
+            m.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
             m.addItem(.separator())
             m.addItem(withTitle: "Quit NotchPeek", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             item.menu = m
@@ -576,13 +594,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showStrip() { strip.show() }
 
+    @objc func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
+        updater?.checkForUpdates(nil)
+    }
+
     @objc func showSettings() {
         if settingsWindow == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 400), styleMask: [.titled, .closable],
                              backing: .buffered, defer: false)
             w.title = "NotchPeek Settings"
             w.isReleasedWhenClosed = false
-            w.contentViewController = NSHostingController(rootView: SettingsView(preview: { [weak self] in self?.strip.show() }))
+            w.contentViewController = NSHostingController(rootView: SettingsView(preview: { [weak self] in self?.strip.show() }, checkUpdates: { [weak self] in self?.checkForUpdates() }))
             w.center()
             settingsWindow = w
         }

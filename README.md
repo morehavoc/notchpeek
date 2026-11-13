@@ -16,10 +16,18 @@ Nothing behind the notch? The strip says so and shows every icon instead. On a M
 - Apple's own items (clock, Control Center, Now Playing) can't be opened this way on macOS 27. They sit at the right end and are never the ones hidden.
 - An app whose menu bar item doesn't support the Accessibility press action can't be opened from the strip.
 
+## Updates
+NotchPeek updates itself with [Sparkle](https://sparkle-project.org) from this repo's GitHub releases (checked daily; turn off automatic installs in Settings).
+
 ## Build
 ```
-./build.sh                       # signs with "Apple Development"; pass another identity as $1
+./build.sh          # fetches Sparkle (checksum-pinned), builds, signs with "Apple Development"
 build/NotchPeek.app/Contents/MacOS/NotchPeek --list   # print every item and whether it's hidden
 NOTCHPEEK_FAKE_NOTCH=2140,85 build/NotchPeek.app/Contents/MacOS/NotchPeek   # test on a Mac without a notch
 ```
-Requires macOS 14+. Builds universal (arm64 + x86_64) with the command line tools, no Xcode project.
+Requires macOS 14+.
+
+## Release
+1. Bump `CFBundleShortVersionString` and `CFBundleVersion` in Info.plist, commit, push a tag `vX.Y.Z`.
+2. CI signs (Developer ID), notarizes, staples and publishes `NotchPeek-X.Y.Z.zip`.
+3. On the machine holding the update key: `scripts/publish-appcast.sh vX.Y.Z` signs the feed and uploads `appcast.xml`.
