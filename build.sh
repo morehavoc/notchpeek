@@ -12,5 +12,6 @@ lipo -create build/NotchPeek-arm64 build/NotchPeek-x86_64 -output $APP/Contents/
 rm build/NotchPeek-*
 cp Info.plist $APP/Contents/
 [ -f AppIcon.icns ] && cp AppIcon.icns $APP/Contents/Resources/
-codesign --force --options runtime --timestamp=none -s "$ID" $APP
+TS="--timestamp=none"; [[ "$ID" == Developer\ ID* ]] && TS="--timestamp"
+codesign --force --options runtime $TS -s "$ID" $APP
 codesign -v $APP && echo "built $APP"
