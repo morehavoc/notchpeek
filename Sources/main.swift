@@ -7,6 +7,84 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import ServiceManagement
+import SwiftUI
+
+// MARK: - Preferences
+
+enum StripStyle: String, CaseIterable { case glass, black, color }
+
+enum Prefs {
+    static let d = UserDefaults.standard
+    static func register() {
+        d.register(defaults: ["style": StripStyle.glass.rawValue, "color": "#1E1E1EE6",
+                              "hotKeyCode": kVK_Space, "hotKeyMods": controlKey | optionKey,
+                              "hover": true, "menuBarIcon": true, "showAll": false])
+    }
+    static var style: StripStyle { StripStyle(rawValue: d.string(forKey: "style") ?? "") ?? .glass }
+    static var color: NSColor { NSColor(hex: d.string(forKey: "color") ?? "") ?? .black }
+    static var hotKeyCode: Int { d.integer(forKey: "hotKeyCode") }
+    static var hotKeyMods: Int { d.integer(forKey: "hotKeyMods") }
+    static var hover: Bool { d.bool(forKey: "hover") }
+    static var showAll: Bool { d.bool(forKey: "showAll") }
+    static var menuBarIcon: Bool { d.bool(forKey: "menuBarIcon") }
+    static var shortcutText: String { hotKeyCode < 0 ? "none" : ShortcutText.describe(code: hotKeyCode, mods: hotKeyMods) }
+}
+
+extension NSColor {
+    convenience init?(hex: String) {
+        var h = hex.trimmingCharacters(in: .whitespaces); if h.hasPrefix("#") { h.removeFirst() }
+        guard h.count == 6 || h.count == 8, let v = UInt64(h, radix: 16) else { return nil }
+        let a = h.count == 8 ? CGFloat(v & 0xFF) / 255 : 1
+        let rgb = h.count == 8 ? v >> 8 : v
+        self.init(srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
+                  blue: CGFloat(rgb & 0xFF) / 255, alpha: a)
+    }
+    var hex: String {
+        let c = usingColorSpace(.sRGB) ?? self
+        return String(format: "#%02X%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255),
+                      Int(c.blueComponent * 255), Int(c.alphaComponent * 255))
+    }
+    var isLight: Bool {
+        let c = usingColorSpace(.sRGB) ?? self
+        return (0.299 * c.redComponent + 0.587 * c.greenComponent + 0.114 * c.blueComponent) > 0.6 && c.alphaComponent > 0.4
+    }
+}
+
+enum ShortcutText {
+    static func describe(code: Int, mods: Int) -> String {
+        var t = ""
+        if mods & controlKey != 0 { t += "⌃" }
+        if mods & optionKey != 0 { t += "⌥" }
+        if mods & shiftKey != 0 { t += "⇧" }
+        if mods & cmdKey != 0 { t += "⌘" }
+        return t + keyName(code)
+    }
+    static func keyName(_ code: Int) -> String {
+        let special: [Int: String] = [kVK_Space: "Space", kVK_Return: "↩", kVK_Tab: "⇥", kVK_Escape: "⎋",
+            kVK_Delete: "⌫", kVK_UpArrow: "↑", kVK_DownArrow: "↓", kVK_LeftArrow: "←", kVK_RightArrow: "→",
+            kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7",
+            kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12"]
+        if let s = special[code] { return s }
+        let src = TISCopyCurrentKeyboardLayoutInputSource().takeRetainedValue()
+        guard let ptr = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return "#\(code)" }
+        let data = Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue() as Data
+        var dead: UInt32 = 0, len = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        data.withUnsafeBytes { raw in
+            _ = UCKeyTranslate(raw.bindMemory(to: UCKeyboardLayout.self).baseAddress!, UInt16(code), UInt16(kUCKeyActionDisplay),
+                               0, UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &len, &chars)
+        }
+        return String(utf16CodeUnits: chars, count: len).uppercased()
+    }
+    static func carbonMods(_ f: NSEvent.ModifierFlags) -> Int {
+        var m = 0
+        if f.contains(.control) { m |= controlKey }
+        if f.contains(.option) { m |= optionKey }
+        if f.contains(.shift) { m |= shiftKey }
+        if f.contains(.command) { m |= cmdKey }
+        return m
+    }
+}
 
 // MARK: - Menu bar items
 
@@ -111,7 +189,7 @@ final class ItemButton: NSButton {
 final class Strip: NSObject {
     private var panel: StripPanel?
     private var hideTimer: Timer?
-    var showAll = UserDefaults.standard.bool(forKey: "showAll")
+    var onSettings: (() -> Void)?
     var isVisible: Bool { panel?.isVisible ?? false }
 
     func toggle() { isVisible ? hide() : show() }
@@ -120,7 +198,7 @@ final class Strip: NSObject {
         guard let notch = Notch.current() ?? fallbackAnchor() else { return }
         let all = MenuBarScanner.items()
         let hidden = all.filter { notch.isHidden($0) }
-        let list = showAll || hidden.isEmpty ? all : hidden
+        let list = Prefs.showAll || hidden.isEmpty ? all : hidden
         let note: String? = hidden.isEmpty ? (all.isEmpty ? "No menu bar icons found" : "Nothing is hiding. All icons:") : nil
 
         let iconSize: CGFloat = 22, pad: CGFloat = 8, gap: CGFloat = 6
@@ -152,33 +230,27 @@ final class Strip: NSObject {
             row.addArrangedSubview(b)
         }
 
-        let bg = NSView()
-        bg.wantsLayer = true
-        bg.layer?.backgroundColor = NSColor.black.cgColor
-        bg.layer?.cornerRadius = 12
-        bg.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner] // round bottom only: grows out of the notch
-        row.translatesAutoresizingMaskIntoConstraints = false
-        bg.addSubview(row)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: bg.leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: bg.trailingAnchor),
-            row.topAnchor.constraint(equalTo: bg.topAnchor),
-            row.bottomAnchor.constraint(equalTo: bg.bottomAnchor),
-        ])
+        let style = Prefs.style
+        let bg = background(style: style, content: row)
         let menu = NSMenu()
         let allItem = NSMenuItem(title: "Show All Icons", action: #selector(toggleShowAll), keyEquivalent: "")
-        allItem.target = self; allItem.state = showAll ? .on : .off
+        allItem.target = self; allItem.state = Prefs.showAll ? .on : .off
         let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self; login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(allItem); menu.addItem(login); menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Shortcut: ⌃⌥Space, or hover the notch", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Shortcut: \(Prefs.shortcutText)\(Prefs.hover ? ", or hover the notch" : "")", action: nil, keyEquivalent: ""))
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit NotchPeek", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         bg.menu = menu
 
         let size = row.fittingSize
         let width = max(size.width, notch.rect.width)
-        let frame = NSRect(x: notch.rect.midX - width / 2, y: notch.rect.minY - size.height,
+        // Black grows straight out of the notch; glass and colours float just under the bar.
+        let drop: CGFloat = style == .black ? 0 : 4
+        let frame = NSRect(x: notch.rect.midX - width / 2, y: notch.rect.minY - size.height - drop,
                            width: width, height: size.height)
         // Keep it on screen.
         var f = frame
@@ -187,6 +259,8 @@ final class Strip: NSObject {
 
         let p = panel ?? makePanel()
         p.contentView = bg
+        p.appearance = style == .black ? NSAppearance(named: .darkAqua)
+            : style == .color ? NSAppearance(named: Prefs.color.isLight ? .aqua : .darkAqua) : nil
         p.setFrame(f, display: true)
         p.orderFrontRegardless()
         panel = p
@@ -197,6 +271,44 @@ final class Strip: NSObject {
         hideTimer?.invalidate(); hideTimer = nil
         panel?.orderOut(nil)
     }
+
+    private func background(style: StripStyle, content: NSView) -> NSView {
+        content.translatesAutoresizingMaskIntoConstraints = false
+        func pin(_ v: NSView) -> NSView {
+            v.addSubview(content)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: v.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: v.trailingAnchor),
+                content.topAnchor.constraint(equalTo: v.topAnchor),
+                content.bottomAnchor.constraint(equalTo: v.bottomAnchor),
+            ])
+            return v
+        }
+        switch style {
+        case .glass:
+            if #available(macOS 26.0, *) {
+                let g = NSGlassEffectView()
+                g.cornerRadius = 14
+                let holder = NSView()
+                _ = pin(holder)
+                g.contentView = holder
+                return g
+            }
+            let v = NSVisualEffectView()
+            v.material = .menu; v.blendingMode = .behindWindow; v.state = .active
+            v.wantsLayer = true; v.layer?.cornerRadius = 14; v.layer?.masksToBounds = true
+            return pin(v)
+        case .black, .color:
+            let v = NSView()
+            v.wantsLayer = true
+            v.layer?.backgroundColor = (style == .black ? NSColor.black : Prefs.color).cgColor
+            v.layer?.cornerRadius = style == .black ? 12 : 14
+            if style == .black { v.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner] }
+            return pin(v)
+        }
+    }
+
+    @objc func openSettings() { hide(); onSettings?() }
 
     private func makePanel() -> StripPanel {
         let p = StripPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -246,33 +358,40 @@ final class Strip: NSObject {
     }
 
     @objc private func toggleShowAll() {
-        showAll.toggle()
-        UserDefaults.standard.set(showAll, forKey: "showAll")
+        UserDefaults.standard.set(!Prefs.showAll, forKey: "showAll")
         show()
     }
 
-    @objc private func toggleLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
-            else { try SMAppService.mainApp.register() }
-        } catch {
+    @objc private func toggleLogin() { LoginItem.set(SMAppService.mainApp.status != .enabled) }
+}
+
+// MARK: - Triggers
+
+enum LoginItem {
+    static var isOn: Bool { SMAppService.mainApp.status == .enabled }
+    static func set(_ on: Bool) {
+        do { on ? try SMAppService.mainApp.register() : try SMAppService.mainApp.unregister() }
+        catch {
             let a = NSAlert(); a.messageText = "Couldn't change Open at Login"; a.informativeText = error.localizedDescription; a.runModal()
         }
     }
 }
 
-// MARK: - Triggers
-
 final class HotKey {
     private var ref: EventHotKeyRef?
     private static var handler: (() -> Void)?
 
-    init(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {
+    init(handler: @escaping () -> Void) {
         HotKey.handler = handler
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in HotKey.handler?(); return noErr }, 1, &spec, nil, nil)
+    }
+
+    func set(code: Int, mods: Int) {
+        if let ref { UnregisterEventHotKey(ref); self.ref = nil }
+        guard code >= 0 else { return }
         let id = EventHotKeyID(signature: OSType(0x4E50_4B31), id: 1) // "NPK1"
-        RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &ref)
+        RegisterEventHotKey(UInt32(code), UInt32(mods), id, GetApplicationEventTarget(), 0, &ref)
     }
 }
 
@@ -282,7 +401,7 @@ final class NotchHover {
 
     init(onHover: @escaping () -> Void) {
         let check: () -> Void = { [weak self] in
-            guard let self, let notch = Notch.current() else { return }
+            guard let self, Prefs.hover, let notch = Notch.current() else { return }
             if notch.rect.insetBy(dx: 0, dy: -2).contains(NSEvent.mouseLocation) {
                 if self.enteredAt == nil { self.enteredAt = Date() }
                 if let t = self.enteredAt, Date().timeIntervalSince(t) > 0.15 { self.enteredAt = .distantFuture; onHover() }
@@ -297,17 +416,115 @@ final class NotchHover {
     }
 }
 
+// MARK: - Settings
+
+final class RecorderButton: NSButton {
+    var onChange: (() -> Void)?
+    private var recording = false { didSet { refresh() } }
+    private var monitor: Any?
+
+    func refresh() { title = recording ? "Type a shortcut…" : Prefs.shortcutText }
+
+    override func mouseDown(with event: NSEvent) {
+        recording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self else { return e }
+            let mods = ShortcutText.carbonMods(e.modifierFlags)
+            if Int(e.keyCode) == kVK_Escape && mods == 0 { self.stop(); return nil }
+            if mods == 0 || mods == shiftKey { NSSound.beep(); return nil } // needs ⌃, ⌥ or ⌘
+            UserDefaults.standard.set(Int(e.keyCode), forKey: "hotKeyCode")
+            UserDefaults.standard.set(mods, forKey: "hotKeyMods")
+            self.stop()
+            return nil
+        }
+    }
+    private func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil; recording = false; onChange?()
+    }
+}
+
+struct ShortcutField: NSViewRepresentable {
+    @Binding var tick: Int
+    func makeNSView(context: Context) -> RecorderButton {
+        let b = RecorderButton()
+        b.bezelStyle = .rounded
+        b.onChange = { tick += 1 }
+        b.refresh()
+        return b
+    }
+    func updateNSView(_ b: RecorderButton, context: Context) { b.refresh() }
+}
+
+final class SettingsModel: ObservableObject {
+    @Published var tick = 0
+    @Published var login = LoginItem.isOn { didSet { if login != LoginItem.isOn { LoginItem.set(login) } } }
+}
+
+struct SettingsView: View {
+    let preview: () -> Void
+    @AppStorage("hover") var hover = true
+    @AppStorage("style") var style = StripStyle.glass.rawValue
+    @AppStorage("color") var colorHex = "#1E1E1EE6"
+    @AppStorage("menuBarIcon") var menuBarIcon = true
+    @AppStorage("showAll") var showAll = false
+    @ObservedObject var model = SettingsModel()
+
+    var body: some View {
+        Form {
+            Section("Open") {
+                LabeledContent("Keyboard shortcut") {
+                    HStack {
+                        ShortcutField(tick: $model.tick).frame(width: 150)
+                        Button("Clear") {
+                            UserDefaults.standard.set(-1, forKey: "hotKeyCode"); model.tick += 1
+                        }
+                    }
+                }
+                Toggle("Open when the pointer touches the notch", isOn: $hover)
+            }
+            Section("Look") {
+                Picker("Background", selection: $style) {
+                    Text("Glass (matches the menu bar)").tag(StripStyle.glass.rawValue)
+                    Text("Black (grows out of the notch)").tag(StripStyle.black.rawValue)
+                    Text("Custom colour").tag(StripStyle.color.rawValue)
+                }
+                if style == StripStyle.color.rawValue {
+                    ColorPicker("Colour", selection: Binding(
+                        get: { Color(nsColor: NSColor(hex: colorHex) ?? .black) },
+                        set: { colorHex = NSColor($0).hex }), supportsOpacity: true)
+                }
+                Button("Preview") { preview() }
+            }
+            Section("General") {
+                Toggle("Always show every icon, not just hidden ones", isOn: $showAll)
+                Toggle("Show NotchPeek in the menu bar", isOn: $menuBarIcon)
+                Toggle("Open at login", isOn: $model.login)
+            }
+            Text("Lost the menu bar icon behind the notch? Open NotchPeek from Applications again to get back here.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+        .formStyle(.grouped)
+        .frame(width: 440)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let strip = Strip()
     var hotKey: HotKey?
+    var statusItem: NSStatusItem?
+    var settingsWindow: NSWindow?
     var hover: NotchHover?
     var escMonitor: Any?, clickMonitor: Any?
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        Prefs.register()
         let args = CommandLine.arguments
         if args.contains("--list") { listAndExit() }
+        strip.onSettings = { [weak self] in self?.showSettings() }
 
         if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
             waitForTrust()
@@ -317,7 +534,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func start() {
-        hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)) { [weak self] in self?.strip.toggle() }
+        hotKey = HotKey { [weak self] in self?.strip.toggle() }
+        applyPrefs()
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.applyPrefs()
+        }
         hover = NotchHover { [weak self] in if self?.strip.isVisible == false { self?.strip.show() } }
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
             if e.keyCode == UInt16(kVK_Escape) { self?.strip.hide() }
@@ -325,10 +546,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.strip.hide()
         }
-        if CommandLine.arguments.contains("--show") || !UserDefaults.standard.bool(forKey: "welcomed") {
-            UserDefaults.standard.set(true, forKey: "welcomed")
+        if CommandLine.arguments.contains("--show") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.strip.show() }
         }
+        if CommandLine.arguments.contains("--settings") || !UserDefaults.standard.bool(forKey: "welcomed") {
+            UserDefaults.standard.set(true, forKey: "welcomed")
+            showSettings()
+        }
+    }
+
+    private var appliedHotKey: (Int, Int)?
+    private func applyPrefs() {
+        let hk = (Prefs.hotKeyCode, Prefs.hotKeyMods)
+        if appliedHotKey == nil || appliedHotKey! != hk { hotKey?.set(code: hk.0, mods: hk.1); appliedHotKey = hk }
+        if Prefs.menuBarIcon && statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            item.button?.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "NotchPeek")
+            let m = NSMenu()
+            m.addItem(withTitle: "Show Hidden Icons", action: #selector(showStrip), keyEquivalent: "").target = self
+            m.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
+            m.addItem(.separator())
+            m.addItem(withTitle: "Quit NotchPeek", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            item.menu = m
+            statusItem = item
+        } else if !Prefs.menuBarIcon, let item = statusItem {
+            NSStatusBar.system.removeStatusItem(item); statusItem = nil
+        }
+    }
+
+    @objc func showStrip() { strip.show() }
+
+    @objc func showSettings() {
+        if settingsWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 400), styleMask: [.titled, .closable],
+                             backing: .buffered, defer: false)
+            w.title = "NotchPeek Settings"
+            w.isReleasedWhenClosed = false
+            w.contentViewController = NSHostingController(rootView: SettingsView(preview: { [weak self] in self?.strip.show() }))
+            w.center()
+            settingsWindow = w
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    // Double-clicking the app while it's running opens Settings (the way back if the menu bar icon is off or hidden).
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettings(); return false
     }
 
     private func waitForTrust() {

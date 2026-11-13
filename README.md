@@ -8,7 +8,7 @@ Hover the notch, or press **⌃⌥Space**. A small black strip drops out of the 
 - Needs **Accessibility** permission only (to read where icons are and open their menus). No screen recording, no network.
 - Free, MIT licensed. One Swift file.
 
-Right-click the strip for **Show All Icons**, **Open at Login** and **Quit**.
+**Settings** (right-click the strip, the menu bar icon, or open the app again): keyboard shortcut, hover on/off, background (Glass to match the menu bar, Black to grow out of the notch, or any colour), show every icon, menu bar icon, open at login.
 
 Nothing behind the notch? The strip says so and shows every icon instead. On a Mac without a notch it opens under the middle of the menu bar.
 
