@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="NotchPeek icon"></p>
+
 # NotchPeek
 
 See the menu bar icons hiding behind your MacBook's notch.
