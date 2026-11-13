@@ -541,6 +541,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--list") { listAndExit() }
         strip.onSettings = { [weak self] in self?.showSettings() }
         strip.onCheckUpdates = { [weak self] in self?.checkForUpdates() }
+        // Updates run even before Accessibility is granted, so a copy stuck at the permission screen still gets fixes.
+        updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
         if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
             waitForTrust()
@@ -550,7 +552,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func start() {
-        updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         hotKey = HotKey { [weak self] in self?.strip.toggle() }
         applyPrefs()
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
