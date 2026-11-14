@@ -97,10 +97,17 @@ struct BarItem {
 }
 
 enum MenuBarScanner {
+    static let appleBarOwners: Set<String> = ["com.apple.controlcenter", "com.apple.systemuiserver",
+                                              "com.apple.MenuBarAgent", "com.apple.TextInputMenuAgent"]
+
     static func items() -> [BarItem] {
         var out: [BarItem] = []
         let me = ProcessInfo.processInfo.processIdentifier
         for app in NSWorkspace.shared.runningApplications where app.processIdentifier != me {
+            // Apple's own items (Wi-Fi, Battery, Focus, clock…) always sit at the far right, so they are never the
+            // ones the notch hides. On macOS 26 Control Center also lists every module, including ones switched off
+            // in Settings, which showed up as a row of identical toggle icons.
+            if let id = app.bundleIdentifier, Self.appleBarOwners.contains(id) { continue }
             let ax = AXUIElementCreateApplication(app.processIdentifier)
             AXUIElementSetMessagingTimeout(ax, 0.25)
             guard let bar: AXUIElement = copy(ax, "AXExtrasMenuBar"),
@@ -114,6 +121,7 @@ enum MenuBarScanner {
                 var pos = CGPoint.zero, size = CGSize.zero
                 if let p: AXValue = copy(el, kAXPositionAttribute) { AXValueGetValue(p, .cgPoint, &pos) }
                 if let s: AXValue = copy(el, kAXSizeAttribute) { AXValueGetValue(s, .cgSize, &size) }
+                if size.width < 1 || size.height < 1 { continue } // not drawn (switched off), not hidden
                 let desc: String? = copy(el, kAXDescriptionAttribute)
                 let title: String? = copy(el, kAXTitleAttribute)
                 let name = app.localizedName ?? app.bundleIdentifier ?? "Unknown"
