@@ -200,6 +200,7 @@ final class Strip: NSObject {
     private var hideTimer: Timer?
     var onSettings: (() -> Void)?
     var onCheckUpdates: (() -> Void)?
+    private var ownMenu: NSMenu?
     var isVisible: Bool { panel?.isVisible ?? false }
 
     func toggle() { isVisible ? hide() : show() }
@@ -258,6 +259,25 @@ final class Strip: NSObject {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit NotchPeek", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         bg.menu = menu
+        // NotchPeek's own icon at the end of the strip: its menu (settings, updates, quit) is one click away.
+        let divider = NSBox(); divider.boxType = .separator
+        divider.heightAnchor.constraint(equalToConstant: iconSize).isActive = true
+        row.addArrangedSubview(divider)
+        let own = NSButton()
+        own.isBordered = false
+        own.bezelStyle = .regularSquare
+        let ownImg = (NSApp.applicationIconImage.copy() as? NSImage) ?? NSImage()
+        ownImg.size = NSSize(width: iconSize, height: iconSize)
+        own.image = ownImg
+        own.imageScaling = .scaleProportionallyUpOrDown
+        own.toolTip = "NotchPeek: settings, updates, quit"
+        own.setAccessibilityLabel("NotchPeek menu")
+        own.target = self
+        own.action = #selector(showOwnMenu(_:))
+        own.widthAnchor.constraint(equalToConstant: iconSize + 6).isActive = true
+        own.heightAnchor.constraint(equalToConstant: iconSize + 6).isActive = true
+        row.addArrangedSubview(own)
+        ownMenu = menu
 
         let size = row.fittingSize
         let width = max(size.width, notch.rect.width)
@@ -322,6 +342,9 @@ final class Strip: NSObject {
     }
 
     @objc func openSettings() { hide(); onSettings?() }
+    @objc private func showOwnMenu(_ sender: NSButton) {
+        ownMenu?.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: sender)
+    }
     @objc func checkUpdates() { hide(); onCheckUpdates?() }
 
     private func makePanel() -> StripPanel {
