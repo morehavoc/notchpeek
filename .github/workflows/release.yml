@@ -12,9 +12,11 @@ permissions:
   contents: write
 jobs:
   release:
+    # A manual run must start from a tag too: never sign and publish an unreviewed branch.
+    if: github.ref_type == 'tag'
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Import the Developer ID certificate
         env:
